@@ -1,5 +1,7 @@
 # 📊 NVIDIA Financial Research Assistant
 
+Quickstart codelab: https://damg-7245.github.io/assignment_5-1/
+
 BACKEND:https://nvidia-backend-707276374664.us-east4.run.app
 
 FRONTEND:https://nvidia-frontend-707276374664.us-east4.run.app
