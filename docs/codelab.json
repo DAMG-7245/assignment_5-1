@@ -1,0 +1,27 @@
+{
+  "environment": "web",
+  "format": "html",
+  "prefix": "https://storage.googleapis.com",
+  "mainga": "UA-49880327-14",
+  "updated": "2025-03-28T15:34:40-04:00",
+  "id": "NVIDIA-Financial-Research-Assistant",
+  "duration": 0,
+  "title": "Multi-Agent NVIDIA Valuation Assistant",
+  "summary": "Building a Multi-Agent NVIDIA Valuation Assistant using LangGraph, Snowflake, and Streamlit",
+  "source": "codelab.md",
+  "theme": "",
+  "status": [
+    "published"
+  ],
+  "category": [
+    "ai",
+    "agent",
+    "langgraph",
+    "snowflake",
+    "llm"
+  ],
+  "tags": [
+    "web"
+  ],
+  "url": "NVIDIA-Financial-Research-Assistant"
+}

@@ -1,0 +1,315 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>Multi-Agent NVIDIA Valuation Assistant</title>
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://storage.googleapis.com/claat-public/codelab-elements.css">
+  <style>
+    .success {
+      color: #1e8e3e;
+    }
+    .error {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <google-codelab-analytics gaid="UA-49880327-14"></google-codelab-analytics>
+  <google-codelab codelab-gaid=""
+                  id="NVIDIA-Financial-Research-Assistant"
+                  title="Multi-Agent NVIDIA Valuation Assistant"
+                  environment="web"
+                  feedback-link="">
+    
+      <google-codelab-step label="Overview" duration="0">
+        <table>
+<tr><td colspan="2" rowspan="1"></td><td colspan="1" rowspan="1"></td></tr>
+<tr><td colspan="1" rowspan="1"><p><strong>Target</strong></p>
+</td><td colspan="1" rowspan="1"><p>Intermediate Python developers, data engineers, ML/NLP builders</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p><strong>Duration</strong></p>
+</td><td colspan="1" rowspan="1"><p>~60–90 minutes</p>
+</td></tr>
+<tr><td colspan="1" rowspan="1"><p><strong>You&#39;ll build</strong></p>
+</td><td colspan="1" rowspan="1"><p>A multi-agent RAG system for NVIDIA&#39;s financial insights</p>
+</td></tr>
+</table>
+<p>A multi-agent research assistant that answers user questions about NVIDIA by combining structured financial data from <strong>Snowflake</strong>, unstructured quarterly reports via <strong>RAG + Pinecone</strong>, and real-time news using <strong>web search agents</strong>. The system is orchestrated using <strong>LangGraph</strong> and served through a <strong>Streamlit</strong> interface.</p>
+<h2 is-upgraded>Prerequisites</h2>
+<ul>
+<li>Python 3.12</li>
+<li>AWS Account (for S3)</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="🚀 Features" duration="0">
+        <ul>
+<li>🤖 <strong>Multi-Agent Architecture (LangGraph)</strong>:<ul>
+<li><code>Snowflake Agent</code>: Queries NVIDIA financial valuation metrics.</li>
+<li><code>RAG Agent</code>: Retrieves insights from quarterly reports via Pinecone (hybrid search with metadata filtering).</li>
+<li><code>Web Search Agent</code>: Fetches recent news and market sentiment using web search APIs (e.g., SerpAPI, Tavily).</li>
+</ul>
+</li>
+<li>📊 <strong>Structured Data Support</strong>:<ul>
+<li>Pulls valuation metrics (e.g., P/E, Market Cap) from Yahoo Finance.</li>
+<li>Populates Snowflake table: <code>RAW.NVIDIA_VALUATION_METRICS</code>.</li>
+</ul>
+</li>
+<li>📄 <strong>Unstructured Data Processing</strong>:<ul>
+<li>Parses NVIDIA quarterly PDF reports.</li>
+<li>Embeds text chunks with metadata (<code>year</code>, <code>quarter</code>) into Pinecone for RAG.</li>
+</ul>
+</li>
+<li>🧠 <strong>LLM-Powered Reasoning</strong>:<ul>
+<li>Answers analytical questions using LangChain + OpenAI or Mistral.</li>
+<li>Each agent returns LLM-generated responses with charts or citations.</li>
+</ul>
+</li>
+<li>🖥️ <strong>Streamlit Frontend</strong>:<ul>
+<li>Simple UI for querying by quarter, year, and selecting agents.</li>
+<li>Displays generated answers and charts.</li>
+</ul>
+</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Step 1: Project Setup" duration="0">
+        <h2 is-upgraded>Clone Repository &amp; Install Dependencies</h2>
+<pre><code language="language-bash" class="language-bash">git clone https://github.com/DAMG-7245/assignment_5-1.git
+
+</code></pre>
+<h2 is-upgraded>📦 Create virtual environment</h2>
+<pre><code language="language-bash" class="language-bash">python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+</code></pre>
+<h2 is-upgraded>Configure Environment Variables</h2>
+<p>Create <code>.env</code> file:</p>
+<pre><code language="language-ini" class="language-ini"># Snowflake
+SNOWFLAKE_ACCOUNT=your_account_id
+SNOWFLAKE_USER=your_user
+SNOWFLAKE_PASSWORD=your_password
+SNOWFLAKE_DATABASE=LANG_DB
+SNOWFLAKE_SCHEMA=RAW
+SNOWFLAKE_WAREHOUSE=your_warehouse
+SNOWFLAKE_ROLE=your_role
+
+# S3
+S3_BUCKET_NAME=your-bucket-name
+AWS_ACCESS_KEY_ID=xxx
+AWS_SECRET_ACCESS_KEY=xxx
+
+# OpenAI
+OPENAI_API_KEY=sk-...
+
+# Pinecone
+PINECONE_API_KEY=your_key
+PINECONE_ENVIRONMENT=gcp-starter
+
+# Jina (optional)
+JINA_AUTH_TOKEN=sk-xxx
+
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Step 2: Load Valuation Metrics into Snowflake" duration="0">
+        <pre><code language="language-bash" class="language-bash">python data/ingest_yahoo_excel.py
+</code></pre>
+<p>This script will:</p>
+<ul>
+<li>Download structured Excel file from S3</li>
+<li>Parse and clean it</li>
+<li>Insert valuation metrics into <code>RAW.NVIDIA_VALUATION_METRICS</code></li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Step 3: Scrape Real-Time Metrics via Yahoo Finance" duration="0">
+        <pre><code language="language-bash" class="language-bash">python data/nvidia_yfin.py
+</code></pre>
+<p>This script hits <code>yfinance</code> to fetch the latest forward PE, PEG, etc., and formats it into a consistent quarterly structure.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Step 4: Parse NVIDIA PDFs and Embed into Pinecone" duration="0">
+        <pre><code language="language-bash" class="language-bash">curl -X POST http://localhost:8000/api/index-reports
+</code></pre>
+<p>This triggers:</p>
+<ol type="1">
+<li>Reading an Excel from S3 (<code>quarter_label</code>, <code>url</code>).</li>
+<li>Downloading and parsing each PDF using Jina (or OCR fallback).</li>
+<li>Splitting the text into semantic chunks.</li>
+<li>Embedding via SentenceTransformers.</li>
+<li>Uploading to Pinecone with metadata: <ul>
+<li><code>quarter_label</code>, <code>year</code>, <code>quarter</code>, <code>source</code>, <code>text</code>, <code>page</code></li>
+</ul>
+</li>
+</ol>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Step 5: Multi-Agent Query Interface" duration="0">
+        <h2 is-upgraded>🔁 How Multi-Agent Integration Works</h2>
+<p>The <code>/api/agent-query</code> endpoint accepts:</p>
+<pre><code language="language-json" class="language-json">{
+  &#34;query&#34;: &#34;Summarize NVIDIA&#39;s growth and valuation in 2024&#34;,
+  &#34;agents&#34;: [&#34;rag&#34;, &#34;snowflake&#34;, &#34;web_search&#34;],
+  &#34;time_range&#34;: {
+    &#34;start_quarter&#34;: &#34;2024q1&#34;,
+    &#34;end_quarter&#34;: &#34;2024q4&#34;
+  }
+}
+</code></pre>
+<p>Each agent is responsible for:</p>
+<ul>
+<li><code>rag_agent</code>: Searches semantic PDF chunks from Pinecone based on the time range.</li>
+<li><code>snowflake_agent</code>: Queries valuation metrics like PE, EV/EBITDA, Market Cap by quarter.</li>
+<li><code>web_search_agent</code>: Pulls relevant news headlines and summaries via SerpAPI or Google.</li>
+</ul>
+<p>The <strong>orchestrator</strong> (in <code>core/orchestrator.py</code>) coordinates all enabled agents and merges their results into a unified <code>AgentResponse</code>.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Step 6: Generate Comprehensive Reports (RAG &#43; Metrics &#43; News)" duration="0">
+        <pre><code language="language-json" class="language-json">POST /api/generate-report
+{
+  &#34;time_range&#34;: {
+    &#34;start_quarter&#34;: &#34;2024q1&#34;,
+    &#34;end_quarter&#34;: &#34;2024q4&#34;
+  }
+}
+</code></pre>
+<p>The orchestrator will:</p>
+<ol type="1">
+<li>Fetch metrics from Snowflake.</li>
+<li>Search Pinecone for semantic content.</li>
+<li>Pull news insights.</li>
+<li>Use an LLM (e.g., Claude or Google Gemini) to synthesize a detailed report with: <ul>
+<li>📈 Historical financials</li>
+<li>🔍 Strategic observations</li>
+<li>🌐 Market sentiment</li>
+</ul>
+</li>
+</ol>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Step 7: Start the Backend API" duration="0">
+        <pre><code language="language-bash" class="language-bash">cd backend
+uvicorn main:app --reload
+</code></pre>
+<ul>
+<li>Exposes endpoints for RAG query orchestration</li>
+<li>Connects to Pinecone and Snowflake</li>
+<li>Logs metadata, matches, and outputs</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Step 8: Run the Streamlit Frontend" duration="0">
+        <pre><code language="language-bash" class="language-bash">cd frontend
+streamlit run app.py
+</code></pre>
+<ul>
+<li>Choose time range (e.g., Q1–Q4 2024)</li>
+<li>Click &#34;Generate Comprehensive Report&#34;</li>
+<li>Results are based on: <ul>
+<li>Valuation metrics from Snowflake</li>
+<li>Semantic context from Pinecone</li>
+<li>News from SerpAPI (optional)</li>
+</ul>
+</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Final Deliverables Checklist" duration="0">
+        <ul>
+<li>[x] Structured ingestion of valuation metrics</li>
+<li>[x] S3 → Snowflake pipeline via pandas</li>
+<li>[x] Retrieval-augmented generation with LangChain + Pinecone</li>
+<li>[x] API + Streamlit frontend</li>
+<li>[x] <code>.md</code> documentation: AIUseDisclosure, architecture, and this Codelab</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="API" duration="0">
+        <h2 is-upgraded>Agent-query</h2>
+<pre><code language="language-python" class="language-python">@app.post(&#34;/api/agent-query&#34;)
+</code></pre>
+<h2 is-upgraded>Generate-report</h2>
+<pre><code language="language-python" class="language-python">@app.post(&#34;/api/generate-report&#34;)
+</code></pre>
+<h2 is-upgraded>Index-reports</h2>
+<pre><code language="language-python" class="language-python">@app.post(&#34;/api/index-reports&#34;)
+</code></pre>
+<h2 is-upgraded>Indexing-status</h2>
+<pre><code language="language-python" class="language-python">@app.get(&#34;/api/indexing-status&#34;)
+</code></pre>
+<h2 is-upgraded>Available-quarters</h2>
+<pre><code language="language-python" class="language-python">@app.get(&#34;/api/available-quarters&#34;)
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Test locally" duration="0">
+        <h2 is-upgraded>Backend</h2>
+<pre><code language="language-bash" class="language-bash">cd backend
+uvicorn main:app
+</code></pre>
+<h2 is-upgraded>Frontend(Replace localhost url)</h2>
+<pre><code language="language-bash" class="language-bash">cd frontend
+streamlit run main.py
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Deployment" duration="0">
+        <h2 is-upgraded>Dockerfile</h2>
+<pre><code language="language-bash" class="language-bash">docker build --platform=linux/amd64 -t gcr.io/YOUR_PROJECT_ID/fastapi-app .
+docker run --rm -it --env-file .env --platform linux/amd64 gcr.io/YOUR_PROJECT_ID/fastapi-app
+docker push gcr.io/YOUR_PROJECT_ID/fastapi-app
+gcloud run deploy fastapi-service \
+  --image gcr.io/YOUR_PROJECT_ID/fastapi-app \
+  --platform managed \
+  --region us-east1 \
+  --allow-unauthenticated
+</code></pre>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script src="https://storage.googleapis.com/claat-public/native-shim.js"></script>
+  <script src="https://storage.googleapis.com/claat-public/custom-elements.min.js"></script>
+  <script src="https://storage.googleapis.com/claat-public/prettify.js"></script>
+  <script src="https://storage.googleapis.com/claat-public/codelab-elements.js"></script>
+  <script src="//support.google.com/inapp/api.js"></script>
+
+</body>
+</html>
