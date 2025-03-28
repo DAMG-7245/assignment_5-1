@@ -6,7 +6,7 @@ BACKEND:https://nvidia-backend-707276374664.us-east4.run.app
 
 FRONTEND:https://nvidia-frontend-707276374664.us-east4.run.app
 
-DEMO:
+Github tasks url: https://github.com/orgs/DAMG-7245/projects/4
 
 A multi-agent research assistant that answers user questions about NVIDIA by combining structured financial data from **Snowflake**, unstructured quarterly reports via **RAG + Pinecone**, and real-time news using **web search agents**. The system is orchestrated using **LangGraph** and served through a **Streamlit** interface.
 
