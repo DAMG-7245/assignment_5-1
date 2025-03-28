@@ -5,7 +5,7 @@ import pandas as pd
 from typing import Dict
 import logging
 
-from core.config import settings
+from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
 
