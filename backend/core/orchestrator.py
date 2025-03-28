@@ -1,10 +1,9 @@
 import logging
-from typing import Dict, Any, List, Optional, Callable, Union, Tuple
+from typing import Dict, Any, List, Optional, Callable, Union, Tuple, TypedDict
 from langchain_core.output_parsers import StrOutputParser
 import asyncio
 
 from langgraph.graph import StateGraph, END
-
 
 from core.models import TimeRange, AgentRequest, AgentResponse, ReportRequest, ReportResponse, AgentType
 from core.langchain_utils import get_llm, create_prompt_template, REPORT_SYSTEM_TEMPLATE
@@ -14,6 +13,7 @@ from agents.web_search_agent import WebSearchAgent
 
 logger = logging.getLogger(__name__)
 
+# 简化为使用纯字典状态
 class ResearchOrchestrator:
     def __init__(self):
         """Initialize the research orchestrator with all agents"""
@@ -26,74 +26,60 @@ class ResearchOrchestrator:
         self.graph = self._build_graph()
         
     def _build_graph(self) -> StateGraph:
-        """Build the LangGraph for orchestrating the agents"""
-        # Define the state schema
-        class AgentState:
-            """Schema for the agent state"""
-            def __init__(
-                self,
-                query: str,
-                agents: List[AgentType],
-                time_range: TimeRange,
-                agent_responses: Dict[str, Optional[AgentResponse]] = None,
-                combined_response: Optional[str] = None,
-                error: Optional[str] = None
-            ):
-                self.query = query
-                self.agents = agents
-                self.time_range = time_range
-                self.agent_responses = agent_responses or {}
-                self.combined_response = combined_response
-                self.error = error
+        """Build the LangGraph for orchestrating the agents using dict-based approach"""
+        # 使用纯字典作为状态
+        workflow = StateGraph(Dict)
         
-        # Create the graph with the defined state
-        workflow = StateGraph(AgentState)
-        
-        # Define nodes for each agent
+        # 添加所有节点
+        workflow.add_node("start", self._start_node)
         workflow.add_node("rag_agent", self._run_rag_agent)
         workflow.add_node("snowflake_agent", self._run_snowflake_agent)
         workflow.add_node("web_search_agent", self._run_web_search_agent)
         workflow.add_node("combiner", self._combine_responses)
         
-        # Define conditional edges to determine which agents to run
+        # 设置入口点
+        workflow.set_entry_point("start")
+        
+        # 从start节点到第一个代理的条件边
         workflow.add_conditional_edges(
-            "root",
-            self._route_agents,
+            "start",
+            self._route_from_start,
             {
                 "rag": "rag_agent",
                 "snowflake": "snowflake_agent",
                 "web_search": "web_search_agent",
-                "all": "rag_agent"
+                "end": "combiner"
             }
         )
         
-        # Define edges from agents to combiner or next agent
+        # 从RAG代理到下一步
         workflow.add_conditional_edges(
             "rag_agent",
-            self._check_next_agent,
+            self._route_after_rag,
             {
                 "snowflake": "snowflake_agent",
                 "web_search": "web_search_agent",
-                "done": "combiner"
+                "end": "combiner"
             }
         )
         
+        # 从Snowflake代理到下一步
         workflow.add_conditional_edges(
             "snowflake_agent",
-            self._check_next_agent,
+            self._route_after_snowflake,
             {
                 "web_search": "web_search_agent",
-                "done": "combiner"
+                "end": "combiner"
             }
         )
         
-        # Web search always goes to combiner next
+        # Web Search代理总是到Combiner
         workflow.add_edge("web_search_agent", "combiner")
         
-        # Combiner is the final node
+        # Combiner是最终节点
         workflow.add_edge("combiner", END)
         
-        # Compile the graph
+        # 编译图
         return workflow.compile()
     
     async def process_agent_request(self, request: AgentRequest) -> Dict[str, Any]:
@@ -107,8 +93,8 @@ class ResearchOrchestrator:
             Dictionary with agent responses and combined response
         """
         try:
-            # Initialize the state
-            state = {
+            # 初始化状态
+            initial_state = {
                 "query": request.query,
                 "agents": [agent.value for agent in request.agents],
                 "time_range": request.time_range,
@@ -117,10 +103,10 @@ class ResearchOrchestrator:
                 "error": None
             }
             
-            # Execute the graph
-            result = await self.graph.ainvoke(state)
+            # 执行图
+            result = await self.graph.ainvoke(initial_state)
             
-            # Format the response
+            # 格式化响应
             response_dict = {
                 "query": request.query,
                 "time_range": {
@@ -138,6 +124,8 @@ class ResearchOrchestrator:
             
         except Exception as e:
             logger.error(f"Error in orchestrator: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 "error": str(e),
                 "query": request.query,
@@ -169,131 +157,191 @@ class ResearchOrchestrator:
             result = await self.process_agent_request(agent_request)
             
             # Extract agent responses
-            rag_response = result["agent_responses"].get("rag", {"content": "No historical data available"})
-            snowflake_response = result["agent_responses"].get("snowflake", {"content": "No financial data available"})
-            web_search_response = result["agent_responses"].get("web_search", {"content": "No real-time data available"})
+            rag_response = {}
+            snowflake_response = {}
+            web_search_response = {}
+        
+            if "agent_responses" in result:
+                agent_responses = result["agent_responses"]
+                if "rag" in agent_responses:
+                    rag_response = agent_responses["rag"]
+                if "snowflake" in agent_responses:
+                    snowflake_response = agent_responses["snowflake"]
+                if "web_search" in agent_responses:
+                    web_search_response = agent_responses["web_search"]
             
             # Get charts from Snowflake response
             charts = {}
-            if "data" in snowflake_response and "charts" in snowflake_response["data"]:
-                charts = snowflake_response["data"]["charts"]
+            if isinstance(snowflake_response, dict) and "data" in snowflake_response:
+                if isinstance(snowflake_response["data"], dict) and "charts" in snowflake_response["data"]:
+                    charts = snowflake_response["data"]["charts"]
             
             # Create the report
             return ReportResponse(
-                historical_performance=rag_response["content"],
-                financial_metrics=snowflake_response["content"],
-                real_time_insights=web_search_response["content"],
+                historical_performance=rag_response.get("content", "No historical data available"),
+                financial_metrics=snowflake_response.get("content", "No financial data available"),
+                real_time_insights=web_search_response.get("content", "No real-time data available"),
                 charts=charts
             )
             
         except Exception as e:
             logger.error(f"Error generating report: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return ReportResponse(
-                historical_performance=f"Error: {str(e)}",
-                financial_metrics="",
-                real_time_insights=""
+                historical_performance=f"Error: Unable to generate historical performance section. {str(e)}",
+                financial_metrics="No financial data available.",
+                real_time_insights="No real-time insights available."
             )
-    
-    def _route_agents(self, state: Dict[str, Any]) -> str:
-        """Determine which agent to run first based on the requested agents"""
+    def _start_node(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """初始化节点，确保必要的状态字段存在"""
+        # 确保agent_responses字段存在
+        if "agent_responses" not in state:
+            state["agent_responses"] = {}
+        return state
+        
+    def _route_from_start(self, state: Dict[str, Any]) -> str:
+        """决定从start节点应该路由到哪个代理"""
         agents = state.get("agents", [])
         
-        if AgentType.ALL.value in agents:
-            return "all"
-        
+        if not agents:
+            return "end"
+            
         if AgentType.RAG.value in agents:
             return "rag"
+            
+        if AgentType.SNOWFLAKE.value in agents:
+            return "snowflake"
+            
+        if AgentType.WEB_SEARCH.value in agents:
+            return "web_search"
+            
+        return "end"
+    
+    def _route_after_rag(self, state: Dict[str, Any]) -> str:
+        """在RAG代理后决定下一步"""
+        agents = state.get("agents", [])
         
         if AgentType.SNOWFLAKE.value in agents:
             return "snowflake"
+            
+        if AgentType.WEB_SEARCH.value in agents:
+            return "web_search"
+            
+        return "end"
+    
+    def _route_after_snowflake(self, state: Dict[str, Any]) -> str:
+        """在Snowflake代理后决定下一步"""
+        agents = state.get("agents", [])
         
         if AgentType.WEB_SEARCH.value in agents:
             return "web_search"
-        
-        # Default to all if no specific agents are requested
-        return "all"
-    
-    def _check_next_agent(self, state: Dict[str, Any]) -> str:
-        """Determine which agent to run next based on the requested agents and what's already run"""
-        agents = state.get("agents", [])
-        agent_responses = state.get("agent_responses", {})
-        
-        # If "all" is requested, run all agents in sequence
-        if AgentType.ALL.value in agents:
-            if "rag" in agent_responses and "snowflake" not in agent_responses:
-                return "snowflake"
-            elif "rag" in agent_responses and "snowflake" in agent_responses:
-                return "web_search"
-        
-        # For specific agent requests, check which ones are left to run
-        if AgentType.SNOWFLAKE.value in agents and "snowflake" not in agent_responses:
-            return "snowflake"
-        
-        if AgentType.WEB_SEARCH.value in agents and "web_search" not in agent_responses:
-            return "web_search"
-        
-        # All requested agents have been run
-        return "done"
+            
+        return "end"
     
     async def _run_rag_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Run the RAG agent"""
+        """运行RAG代理"""
         try:
             query = state.get("query", "")
             time_range = state.get("time_range")
             
+            # 获取RAG代理的响应
             response = await self.rag_agent.process_query(query, time_range)
             
-            state["agent_responses"]["rag"] = response
-            return state
+            # 创建一个新的状态字典
+            new_state = state.copy()
+            
+            # 确保agent_responses存在
+            if "agent_responses" not in new_state:
+                new_state["agent_responses"] = {}
+                
+            # 添加RAG代理的响应
+            new_state["agent_responses"]["rag"] = response
+            
+            return new_state
             
         except Exception as e:
             logger.error(f"Error in RAG agent: {e}")
-            state["error"] = f"RAG agent error: {str(e)}"
-            return state
+            
+            # 创建一个新的状态字典
+            new_state = state.copy()
+            new_state["error"] = f"RAG agent error: {str(e)}"
+            
+            return new_state
     
     async def _run_snowflake_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Run the Snowflake agent"""
+        """运行Snowflake代理"""
         try:
             query = state.get("query", "")
             time_range = state.get("time_range")
             
+            # 获取Snowflake代理的响应
             response = await self.snowflake_agent.process_query(query, time_range)
             
-            state["agent_responses"]["snowflake"] = response
-            return state
+            # 创建一个新的状态字典
+            new_state = state.copy()
+            
+            # 确保agent_responses存在
+            if "agent_responses" not in new_state:
+                new_state["agent_responses"] = {}
+                
+            # 添加Snowflake代理的响应
+            new_state["agent_responses"]["snowflake"] = response
+            
+            return new_state
             
         except Exception as e:
             logger.error(f"Error in Snowflake agent: {e}")
-            state["error"] = f"Snowflake agent error: {str(e)}"
-            return state
+            
+            # 创建一个新的状态字典
+            new_state = state.copy()
+            new_state["error"] = f"Snowflake agent error: {str(e)}"
+            
+            return new_state
     
     async def _run_web_search_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Run the Web Search agent"""
+        """运行Web Search代理"""
         try:
             query = state.get("query", "")
             time_range = state.get("time_range")
             
+            # 获取Web Search代理的响应
             response = await self.web_search_agent.process_query(query, time_range)
             
-            state["agent_responses"]["web_search"] = response
-            return state
+            # 创建一个新的状态字典
+            new_state = state.copy()
+            
+            # 确保agent_responses存在
+            if "agent_responses" not in new_state:
+                new_state["agent_responses"] = {}
+                
+            # 添加Web Search代理的响应
+            new_state["agent_responses"]["web_search"] = response
+            
+            return new_state
             
         except Exception as e:
             logger.error(f"Error in Web Search agent: {e}")
-            state["error"] = f"Web Search agent error: {str(e)}"
-            return state
+            
+            # 创建一个新的状态字典
+            new_state = state.copy()
+            new_state["error"] = f"Web Search agent error: {str(e)}"
+            
+            return new_state
     
     async def _combine_responses(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Combine responses from all agents"""
+        """整合所有代理的响应"""
         try:
             query = state.get("query", "")
             agent_responses = state.get("agent_responses", {})
             
             if not agent_responses:
-                state["combined_response"] = "No responses from any agents."
-                return state
+                # 创建一个新的状态字典
+                new_state = state.copy()
+                new_state["combined_response"] = "No responses from any agents."
+                return new_state
             
-            # Format input for the combiner
+            # 格式化输入
             inputs = []
             
             if "rag" in agent_responses:
@@ -307,7 +355,7 @@ class ResearchOrchestrator:
             
             combined_input = "\n\n".join(inputs)
             
-            # Create prompt
+            # 创建提示
             human_template = """
             Based on the following agent responses, please provide a consolidated answer to the user's query:
 
@@ -324,7 +372,7 @@ class ResearchOrchestrator:
                 human_template=human_template
             )
             
-            # Generate response
+            # 生成响应
             response = await self.llm.ainvoke(
                 prompt.format_messages(
                     query=query,
@@ -332,11 +380,18 @@ class ResearchOrchestrator:
                 )
             )
             
-            state["combined_response"] = response.content
-            return state
+            # 创建一个新的状态字典
+            new_state = state.copy()
+            new_state["combined_response"] = response.content
+            
+            return new_state
             
         except Exception as e:
             logger.error(f"Error combining responses: {e}")
-            state["error"] = f"Error combining responses: {str(e)}"
-            state["combined_response"] = "Error combining agent responses."
-            return state
+            
+            # 创建一个新的状态字典
+            new_state = state.copy()
+            new_state["error"] = f"Error combining responses: {str(e)}"
+            new_state["combined_response"] = "Error combining agent responses."
+            
+            return new_state

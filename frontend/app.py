@@ -8,7 +8,7 @@ import io
 from datetime import datetime
 
 # API Configuration
-API_URL = "http://backend:8000"  # Docker service name
+API_URL = "http://localhost:8000"  # Docker service name
 
 # Set page configuration
 st.set_page_config(
@@ -127,7 +127,7 @@ def display_chart(base64_str, caption=""):
     try:
         image_data = base64.b64decode(base64_str)
         image = Image.open(io.BytesIO(image_data))
-        st.image(image, caption=caption, use_column_width=True)
+        st.image(image, caption=caption, use_container_width=True)
     except Exception as e:
         st.error(f"Error displaying chart: {str(e)}")
 
