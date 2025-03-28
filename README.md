@@ -35,6 +35,7 @@ A multi-agent research assistant that answers user questions about NVIDIA by com
 ## 📂 Project Structure
 
 ## **🛠️ Diagrams**
+![Alt Text](nvidia_research_architecture.png)
 
 ## 🧑‍💻 How to Run
 
