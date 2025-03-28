@@ -5,9 +5,12 @@ import logging
 import matplotlib.pyplot as plt
 import io
 import base64
+from backend.services.yahoo_finance_service import get_nvda_valuation_row
 
-from core.config import settings
-from core.models import TimeRange, NvidiaValuationMetric
+
+from backend.core.models import TimeRange, NvidiaValuationMetric
+from backend.core.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +31,9 @@ class SnowflakeService:
         """Close connection when the object is destroyed"""
         if hasattr(self, 'connection'):
             self.connection.close()
-            
+        """
     def execute_query(self, query: str) -> pd.DataFrame:
-        """Execute SQL query and return results as pandas DataFrame"""
+    "Execute SQL query and return results as pandas DataFrame"
         try:
             cur = self.connection.cursor()
             cur.execute(query)
@@ -40,7 +43,23 @@ class SnowflakeService:
         except Exception as e:
             logger.error(f"Error executing Snowflake query: {e}")
             raise
-            
+        """
+    def execute_query(self, query: str) -> pd.DataFrame:
+        """執行 SQL 並用 fetchall 回傳 pandas DataFrame（不依賴 fetch_pandas_all）"""
+        try:
+            cur = self.connection.cursor()
+            cur.execute(query)
+
+            columns = [col[0] for col in cur.description]
+            rows = cur.fetchall()
+            cur.close()
+
+            return pd.DataFrame(rows, columns=columns)
+
+        except Exception as e:
+            logger.error(f"Error executing Snowflake query: {e}")
+            raise
+
     def get_valuation_metrics(self, time_range: TimeRange) -> List[NvidiaValuationMetric]:
         """Get NVIDIA valuation metrics for the specified time range"""
         start_year, start_q = self._parse_quarter_label(time_range.start_quarter)
@@ -160,3 +179,52 @@ class SnowflakeService:
         """Parse quarter label in format YYYYqQ to year and quarter number"""
         parts = quarter_label.lower().split('q')
         return int(parts[0]), int(parts[1])
+        def insert_valuation_metric(self, data: dict):
+            """將單筆 NVIDIA 估值資料寫入 Snowflake"""
+        query = f"""
+        INSERT INTO RAW.NVIDIA_VALUATION_METRICS (
+            YEAR, QUARTER, QUARTER_LABEL, DATE,
+            MARKET_CAP, ENTERPRISE_VALUE, TRAILING_PE, FORWARD_PE,
+            PEG_RATIO, PRICE_TO_SALES, PRICE_TO_BOOK,
+            ENTERPRISE_TO_REVENUE, ENTERPRISE_TO_EBITDA
+        ) VALUES (
+            {data.get('year')}, 
+            {data.get('quarter')}, 
+            '{data.get('quarter_label')}', 
+            '{data.get('date')}',
+            {data.get('market_cap') or 'NULL'}, 
+            {data.get('enterprise_value') or 'NULL'}, 
+            {data.get('trailing_pe') or 'NULL'}, 
+            {data.get('forward_pe') or 'NULL'},
+            {data.get('peg_ratio') or 'NULL'}, 
+            {data.get('price_to_sales') or 'NULL'}, 
+            {data.get('price_to_book') or 'NULL'},
+            {data.get('enterprise_to_revenue') or 'NULL'}, 
+            {data.get('enterprise_to_ebitda') or 'NULL'}
+        )
+        """
+        self.execute_query(query)
+
+
+
+data = get_nvda_valuation_row()
+df = pd.DataFrame([data])
+
+service = SnowflakeService()
+for row in df.itertuples(index=False):
+    service.execute_query(
+        f"""
+        INSERT INTO RAW.NVIDIA_VALUATION_METRICS (
+            YEAR, QUARTER, QUARTER_LABEL, DATE,
+            MARKET_CAP, ENTERPRISE_VALUE, TRAILING_PE, FORWARD_PE,
+            PEG_RATIO, PRICE_TO_SALES, PRICE_TO_BOOK,
+            ENTERPRISE_TO_REVENUE, ENTERPRISE_TO_EBITDA
+        )
+        VALUES (
+            {row.year}, {row.quarter}, '{row.quarter_label}', '{row.date}',
+            {row.market_cap or 'NULL'}, {row.enterprise_value or 'NULL'}, {row.trailing_pe or 'NULL'}, {row.forward_pe or 'NULL'},
+            {row.peg_ratio or 'NULL'}, {row.price_to_sales or 'NULL'}, {row.price_to_book or 'NULL'},
+            {row.enterprise_to_revenue or 'NULL'}, {row.enterprise_to_ebitda or 'NULL'}
+        )
+        """
+    )

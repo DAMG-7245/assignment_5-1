@@ -8,11 +8,11 @@ from pinecone import Pinecone, ServerlessSpec
 # 改用HuggingFace嵌入代替VertexAI嵌入，更容易设置
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from backend.core.config import settings
 
-from core.config import settings
-from core.models import TimeRange, PineconeMetadata
-from services.s3_service import S3Service
-from services.pdf_parser_service import PDFParserService
+from backend.core.models import TimeRange, PineconeMetadata
+from backend.services.s3_service import S3Service
+from backend.services.pdf_parser_service import PDFParserService
 
 logger = logging.getLogger(__name__)
 
