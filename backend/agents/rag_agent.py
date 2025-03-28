@@ -17,24 +17,40 @@ class RAGAgent:
         self.llm = get_llm(temperature=0.2)
         
     async def process_query(self, query: str, time_range: Optional[TimeRange] = None) -> AgentResponse:
-        """
-        Process a query using RAG with Pinecone
-        
-        Args:
-            query: The user query
-            time_range: Optional time range filter
-            
-        Returns:
-            Agent response with content and metadata
-        """
+        """处理查询"""
+        status = self.pinecone_service.check_pinecone_status()
+        logger.info(f"Pinecone数据库状态: {status}")
         try:
-            # Search for relevant documents
+            logger.info(f"RAG代理处理查询: '{query}', 时间范围: {time_range}")
+            
+            # 检查Pinecone索引状态
+            total_vectors = self.pinecone_service.check_index_stats()
+            if total_vectors == 0:
+                return AgentResponse(
+                    agent_type=AgentType.RAG,
+                    content="The document database is empty. Please trigger report indexing before querying."
+                )
+            
+            # 列出可用的季度
+            available_quarters = self.pinecone_service.list_all_quarters()
+            logger.info(f"可用季度: {available_quarters}")
+            
+            # 检查请求的时间范围是否在可用季度内
+            if time_range and available_quarters:
+                if time_range.start_quarter not in available_quarters and time_range.end_quarter not in available_quarters:
+                    logger.warning(f"请求的时间范围 {time_range.start_quarter}-{time_range.end_quarter} 不在可用季度 {available_quarters} 内")
+                    return AgentResponse(
+                        agent_type=AgentType.RAG,
+                        content=f"I couldn't find any reports for the specified time period ({time_range.start_quarter} to {time_range.end_quarter}). Available periods are: {', '.join(available_quarters)}."
+                    )
+            
+            # 搜索相关文档
             search_results = self.pinecone_service.hybrid_search(
                 query=query,
                 time_range=time_range,
                 top_k=5
             )
-            
+                
             if not search_results:
                 return AgentResponse(
                     agent_type=AgentType.RAG,

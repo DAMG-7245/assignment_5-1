@@ -86,7 +86,11 @@ class PineconeService:
                     )
                     
                     # 先按段落分割
-                    text_chunks = self.pdf_parser.chunk_text(pdf_text)
+                    text_chunks = text_splitter.split_text(pdf_text)  
+                    logger.info(f"{quarter_label} 分块数量: {len(text_chunks)}")  # 新增日志
+                    if not text_chunks:
+                        logger.warning(f"{quarter_label} 未生成有效文本分块，跳过处理")
+                        continue
                     
                     # 为每个分块创建元数据
                     documents = []
@@ -108,7 +112,7 @@ class PineconeService:
                     # 获取嵌入
                     chunk_texts = [doc["page_content"] for doc in documents]
                     embeddings = self.embeddings.embed_documents(chunk_texts)
-                    
+                    logger.info(f"生成的嵌入数量: {len(embeddings)}, 维度: {len(embeddings[0]) if embeddings else 0}")
                     # 准备向量上传
                     for i, (doc, embedding) in enumerate(zip(documents, embeddings)):
                         vector = {
@@ -139,37 +143,76 @@ class PineconeService:
             logger.error(f"索引NVIDIA报告时出错: {e}")
             raise
     
+    # 修改hybrid_search方法以添加更多调试信息
     def hybrid_search(self, query: str, time_range: Optional[TimeRange] = None, top_k: int = 5) -> List[Dict[str, Any]]:
-        """
-        执行基于时间范围元数据过滤的混合搜索
+        """执行基于时间范围元数据过滤的混合搜索"""
+        # 检查索引状态
+        vector_count = self.check_index_stats()
+        if vector_count == 0:
+            logger.warning("Pinecone索引中没有向量，无法执行搜索")
+            return []
         
-        参数:
-            query: 搜索查询
-            time_range: 可选的时间范围过滤
-            top_k: 返回结果数量
-            
-        返回:
-            包含内容和元数据的搜索结果列表
-        """
         # 生成查询的嵌入
         query_embedding = self.embeddings.embed_query(query)
+        
+        # 记录查询信息
+        if time_range:
+            logger.info(f"查询: '{query}', 时间范围: {time_range.start_quarter} 到 {time_range.end_quarter}")
+        else:
+            logger.info(f"查询: '{query}', 无时间范围过滤")
         
         # 如果提供了时间范围，设置元数据过滤
         filter_dict = None
         if time_range:
-            start_year, start_q = self._parse_quarter_label(time_range.start_quarter)
-            end_year, end_q = self._parse_quarter_label(time_range.end_quarter)
-            
-            # 构建过滤器
-            filter_dict = self._construct_time_filter(start_year, start_q, end_year, end_q)
+            try:
+                start_year, start_q = self._parse_quarter_label(time_range.start_quarter)
+                end_year, end_q = self._parse_quarter_label(time_range.end_quarter)
+                
+                # 构建过滤器
+                filter_dict = self._construct_time_filter(start_year, start_q, end_year, end_q)
+                logger.info(f"应用过滤器: {filter_dict}")
+            except Exception as e:
+                logger.error(f"构建时间过滤器时出错: {e}")
         
         # 执行搜索
-        results = self.index.query(
-            vector=query_embedding,
-            filter=filter_dict,
-            top_k=top_k,
-            include_metadata=True
-        )
+        try:
+            # 首先尝试带过滤器的查询
+            results = self.index.query(
+                vector=query_embedding,
+                filter=filter_dict,
+                top_k=top_k,
+                include_metadata=True
+            )
+            
+            # 记录结果数量
+            match_count = len(results.get('matches', []))
+            logger.info(f"带过滤器查询返回 {match_count} 条结果")
+            
+            # 如果没有结果且使用了过滤器，尝试不带过滤器的查询
+            if match_count == 0 and filter_dict is not None:
+                logger.info("尝试不带过滤器的查询...")
+                unfiltered_results = self.index.query(
+                    vector=query_embedding,
+                    filter=None,
+                    top_k=top_k,
+                    include_metadata=True
+                )
+                unfiltered_count = len(unfiltered_results.get('matches', []))
+                logger.info(f"不带过滤器查询返回 {unfiltered_count} 条结果")
+                
+                # 如果不带过滤器有结果，说明过滤器有问题
+                if unfiltered_count > 0:
+                    for match in unfiltered_results.get('matches', []):
+                        metadata = match.get("metadata", {})
+                        logger.info(f"不带过滤器结果: 季度={metadata.get('quarter_label', 'unknown')}, 年={metadata.get('year', 'unknown')}, 季={metadata.get('quarter', 'unknown')}")
+                    
+                    logger.warning("过滤器太严格，排除了所有结果。使用不带过滤器的结果。")
+                    results = unfiltered_results
+                    match_count = unfiltered_count
+        
+        except Exception as e:
+            logger.error(f"执行搜索时出错: {e}")
+            return []
         
         # 格式化结果
         formatted_results = []
@@ -179,6 +222,9 @@ class PineconeService:
             metadata = match.get("metadata", {})
             if "text" in metadata:
                 content = metadata["text"]
+            
+            # 记录匹配项详细信息
+            logger.info(f"匹配项: 季度={metadata.get('quarter_label', 'unknown')}, 分数={match.get('score', 0)}")
             
             formatted_results.append({
                 "content": content,
@@ -227,3 +273,94 @@ class PineconeService:
         """解析格式为YYYYqQ的季度标签为年份和季度编号"""
         parts = quarter_label.lower().split('q')
         return int(parts[0]), int(parts[1])
+# 在PineconeService类中添加以下方法
+
+    def check_index_stats(self):
+        """检查Pinecone索引统计信息"""
+        try:
+            stats = self.index.describe_index_stats()
+            total_vectors = stats.total_vector_count
+            namespaces = stats.namespaces
+            logger.info(f"Pinecone索引中共有 {total_vectors} 个向量")
+            logger.info(f"索引命名空间: {namespaces}")
+            return total_vectors
+        except Exception as e:
+            logger.error(f"获取Pinecone索引统计信息时出错: {e}")
+            return 0
+
+    def list_all_quarters(self):
+        """列出索引中所有的季度标签"""
+        try:
+            # 简单查询以获取一些向量
+            results = self.index.query(
+                vector=[0.1] * 384,  # 使用随机向量
+                top_k=100,
+                include_metadata=True
+            )
+            
+            quarters = set()
+            for match in results.get('matches', []):
+                metadata = match.get("metadata", {})
+                if "quarter_label" in metadata:
+                    quarters.add(metadata["quarter_label"])
+            
+            quarters_list = sorted(list(quarters))
+            logger.info(f"索引中包含以下季度: {quarters_list}")
+            return quarters_list
+        except Exception as e:
+            logger.error(f"列出索引中的季度标签时出错: {e}")
+            return []
+    
+    def check_pinecone_status(self):
+        """检查Pinecone索引状态并返回详细信息"""
+        try:
+            # 获取索引统计信息
+            stats = self.index.describe_index_stats()
+            
+            # 提取总向量数量
+            total_vectors = stats.total_vector_count
+            logger.info(f"Pinecone索引中共有 {total_vectors} 个向量")
+            
+            # 提取命名空间信息（如果有）
+            namespaces = stats.namespaces if hasattr(stats, 'namespaces') else {}
+            logger.info(f"Pinecone索引命名空间: {namespaces}")
+            
+            # 如果有向量，尝试获取其元数据样本
+            if total_vectors > 0:
+                # 使用随机向量进行查询以获取样本数据
+                sample_results = self.index.query(
+                    vector=[0.1] * 384,  # 使用一个随机向量
+                    top_k=5,
+                    include_metadata=True
+                )
+                
+                # 提取季度信息
+                quarters = set()
+                for match in sample_results.get('matches', []):
+                    metadata = match.get("metadata", {})
+                    if "quarter_label" in metadata:
+                        quarters.add(metadata["quarter_label"])
+                
+                quarters_list = sorted(list(quarters))
+                logger.info(f"样本向量中的季度: {quarters_list}")
+                
+                # 返回详细统计信息
+                return {
+                    "total_vectors": total_vectors,
+                    "namespaces": namespaces,
+                    "sample_quarters": quarters_list,
+                    "status": "ready" if total_vectors > 0 else "empty"
+                }
+            else:
+                logger.warning("Pinecone索引为空，没有向量数据")
+                return {
+                    "total_vectors": 0,
+                    "status": "empty"
+                }
+                
+        except Exception as e:
+            logger.error(f"检查Pinecone状态时出错: {e}")
+            return {
+                "error": str(e),
+                "status": "error"
+            }

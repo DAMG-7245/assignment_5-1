@@ -8,7 +8,7 @@ import io
 from datetime import datetime
 
 # API Configuration
-API_URL = "http://localhost:8000"  # Docker service name
+API_URL = "http://127.0.0.1:8000"  # Docker service name
 
 # Set page configuration
 st.set_page_config(
@@ -36,6 +36,25 @@ st.markdown("""
         border-radius: 5px;
         margin-bottom: 1rem;
         border-left: 5px solid #76b900;
+    }
+    /* 新增的样式 */
+    .agent-section-rag {
+        background-color: rgba(118, 185, 0, 0.1);  /* 淡绿色背景 */
+        padding: 1rem;
+        border-radius: 5px;
+        margin-bottom: 1rem;
+        border-left: 5px solid #76b900;
+    }
+    .agent-section-web {
+        background-color: rgba(118, 185, 0, 0.1);  /* 淡绿色背景 */
+        padding: 1rem;
+        border-radius: 5px;
+        margin-bottom: 1rem;
+        border-left: 5px solid #76b900;
+    }
+    .agent-header-green {
+        color: #76b900;  /* NVIDIA绿色文字 */
+        font-weight: bold;
     }
     .report-section {
         background-color: #f8f9fa;
@@ -287,15 +306,19 @@ def main():
                     
                 # Format agent name
                 agent_name = agent_type.upper()
+                css_class = "agent-section"  # 默认样式类
+                
                 if agent_type == "rag":
                     agent_name = "Historical Reports (RAG)"
+                    css_class = "agent-section-rag"  # 使用RAG专用样式
                 elif agent_type == "snowflake":
                     agent_name = "Financial Metrics (Snowflake)"
                 elif agent_type == "web_search":
                     agent_name = "Real-time Insights (Web Search)"
+                    css_class = "agent-section-web"  # 使用Web Search专用样式
                 
-                # Display agent response
-                st.markdown(f"<div class='agent-section'><h4>{agent_name}</h4>", unsafe_allow_html=True)
+                # Display agent response with appropriate CSS class
+                st.markdown(f"<div class='{css_class}'><h4 class='agent-header-green'>{agent_name}</h4>", unsafe_allow_html=True)
                 st.markdown(response["content"])
                 
                 # Display charts if available
