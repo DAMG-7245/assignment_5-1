@@ -23,6 +23,7 @@ class S3Service:
     def get_quarterly_report_mapping(self) -> Dict[str, str]:
         """
         从S3拉取Excel并返回 { quarter_label: PDF URL } 字典。
+        适配'Year_Quarter'和'Link'列名格式。
         如果出现错误，则抛出异常。
         """
         try:
@@ -38,20 +39,32 @@ class S3Service:
 
         try:
             df = pd.read_excel(io.BytesIO(excel_bytes))
+            logger.info(f"成功读取Excel文件，列名: {df.columns.tolist()}")
         except Exception as e:
             logger.error(f"Failed to read Excel file: {e}")
             raise RuntimeError(f"读取Excel文件失败: {e}")
 
-        # 检查必要的列是否存在
-        required_columns = {"quarter_label", "url"}
-        if not required_columns.issubset(df.columns):
-            missing = required_columns - set(df.columns)
-            logger.error(f"Excel file missing required columns: {missing}")
-            raise ValueError(f"Excel文件缺少必需的列: {missing}")
+        # 检查是否有"Year_Quarter"和"Link"列
+        if "Year_Quarter" in df.columns and "Link" in df.columns:
+            logger.info("找到'Year_Quarter'和'Link'列")
+            # 构造字典，转换成字符串并去除空格
+            mapping = df.set_index("Year_Quarter")["Link"].apply(lambda x: str(x).strip()).to_dict()
+        # 检查是否有"quarter_label"和"url"列
+        elif "quarter_label" in df.columns and "url" in df.columns:
+            logger.info("找到'quarter_label'和'url'列")
+            mapping = df.set_index("quarter_label")["url"].apply(lambda x: str(x).strip()).to_dict()
+        else:
+            # 如果两种格式都不存在，抛出错误
+            logger.error(f"Excel文件中找不到必需的列组合。当前列: {df.columns.tolist()}")
+            raise ValueError("Excel文件缺少必需的列: 需要'Year_Quarter'和'Link'或'quarter_label'和'url'")
 
-        # 构造字典，转换成字符串并去除空格
-        mapping = df.set_index("quarter_label")["url"].apply(lambda x: str(x).strip()).to_dict()
-
+        # 记录找到的映射
+        logger.info(f"成功创建报告映射，包含{len(mapping)}个季度报告")
+        
+        # 打印前几个映射用于调试
+        sample_entries = list(mapping.items())[:3]
+        logger.info(f"报告映射示例: {sample_entries}")
+        
         return mapping
 
     def get_presigned_url(self, pdf_key: str, expires_in: int = 3600) -> str:
