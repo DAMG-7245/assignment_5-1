@@ -3,110 +3,161 @@ import snowflake.connector
 from typing import List, Dict, Any, Optional
 import logging
 import matplotlib.pyplot as plt
+import matplotlib
 import io
 import base64
-from backend.services.yahoo_finance_service import get_nvda_valuation_row
+import os
+import random
+from datetime import datetime
+import numpy as np
+# Set font support
+matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'DejaVu Sans', 'Bitstream Vera Sans', 'sans-serif']
+matplotlib.rcParams['axes.unicode_minus'] = False  # Fix minus sign display issue
 
-
-from backend.core.models import TimeRange, NvidiaValuationMetric
-from backend.core.config import settings
-
+from core.config import settings
+from core.models import TimeRange, NvidiaValuationMetric
 
 logger = logging.getLogger(__name__)
 
 class SnowflakeService:
     def __init__(self):
-        """Initialize the Snowflake connection"""
-        self.connection = snowflake.connector.connect(
-            account=settings.SNOWFLAKE_ACCOUNT,
-            user=settings.SNOWFLAKE_USER,
-            password=settings.SNOWFLAKE_PASSWORD,
-            database=settings.SNOWFLAKE_DATABASE,
-            schema=settings.SNOWFLAKE_SCHEMA,
-            warehouse=settings.SNOWFLAKE_WAREHOUSE,
-            role=settings.SNOWFLAKE_ROLE
-        )
-        
+        """Initialize Snowflake connection"""
+        self.connection = None
+        try:
+            # Try to connect to Snowflake
+            if (settings.SNOWFLAKE_ACCOUNT and 
+                settings.SNOWFLAKE_USER and 
+                settings.SNOWFLAKE_PASSWORD):
+                logger.info("Attempting to connect to Snowflake...")
+                
+                # Use LANG_ROLE instead of ACCOUNTADMIN
+                self.connection = snowflake.connector.connect(
+                    account=settings.SNOWFLAKE_ACCOUNT,
+                    user=settings.SNOWFLAKE_USER,
+                    password=settings.SNOWFLAKE_PASSWORD,
+                    database=settings.SNOWFLAKE_DATABASE,
+                    schema=settings.SNOWFLAKE_SCHEMA,
+                    warehouse=settings.SNOWFLAKE_WAREHOUSE,
+                    role="LANG_ROLE"  # Use LANG_ROLE specifically
+                )
+                logger.info(f"Successfully connected to Snowflake: {settings.SNOWFLAKE_DATABASE}.{settings.SNOWFLAKE_SCHEMA} with LANG_ROLE")
+            else:
+                logger.warning("Incomplete Snowflake connection info")
+        except Exception as e:
+            logger.error(f"Error connecting to Snowflake: {e}")
+            
     def __del__(self):
-        """Close connection when the object is destroyed"""
-        if hasattr(self, 'connection'):
-            self.connection.close()
-        """
+        """Close connection when object is destroyed"""
+        if hasattr(self, 'connection') and self.connection:
+            try:
+                self.connection.close()
+            except:
+                pass
+            
     def execute_query(self, query: str) -> pd.DataFrame:
-    "Execute SQL query and return results as pandas DataFrame"
+        """Execute SQL query and return results as pandas DataFrame"""
         try:
-            cur = self.connection.cursor()
-            cur.execute(query)
-            result = cur.fetch_pandas_all()
-            cur.close()
-            return result
+            if self.connection:
+                cur = self.connection.cursor()
+                cur.execute(query)
+                result = cur.fetch_pandas_all()
+                cur.close()
+                return result
+            else:
+                logger.warning("Snowflake not connected, cannot execute query")
+                return pd.DataFrame()
         except Exception as e:
             logger.error(f"Error executing Snowflake query: {e}")
             raise
-        """
-    def execute_query(self, query: str) -> pd.DataFrame:
-        """執行 SQL 並用 fetchall 回傳 pandas DataFrame（不依賴 fetch_pandas_all）"""
-        try:
-            cur = self.connection.cursor()
-            cur.execute(query)
-
-            columns = [col[0] for col in cur.description]
-            rows = cur.fetchall()
-            cur.close()
-
-            return pd.DataFrame(rows, columns=columns)
-
-        except Exception as e:
-            logger.error(f"Error executing Snowflake query: {e}")
-            raise
-
+            
     def get_valuation_metrics(self, time_range: TimeRange) -> List[NvidiaValuationMetric]:
         """Get NVIDIA valuation metrics for the specified time range"""
-        start_year, start_q = self._parse_quarter_label(time_range.start_quarter)
-        end_year, end_q = self._parse_quarter_label(time_range.end_quarter)
-        
-        query = f"""
-        SELECT 
-            YEAR, 
-            QUARTER, 
-            QUARTER_LABEL,
-            MARKET_CAP, 
-            ENTERPRISE_VALUE, 
-            TRAILING_PE, 
-            FORWARD_PE, 
-            PRICE_TO_SALES, 
-            PRICE_TO_BOOK, 
-            ENTERPRISE_TO_REVENUE, 
-            ENTERPRISE_TO_EBITDA
-        FROM NVIDIA_VALUATION_METRICS
-        WHERE (YEAR > {start_year} OR (YEAR = {start_year} AND QUARTER >= {start_q}))
-            AND (YEAR < {end_year} OR (YEAR = {end_year} AND QUARTER <= {end_q}))
-        ORDER BY YEAR, QUARTER
-        """
-        
-        df = self.execute_query(query)
-        
-        if df.empty:
+        if not self.connection:
+            logger.error("No Snowflake connection available")
             return []
             
-        # Convert DataFrame to list of NvidiaValuationMetric objects
-        return [
-            NvidiaValuationMetric(
-                year=row.YEAR,
-                quarter=row.QUARTER,
-                quarter_label=row.QUARTER_LABEL,
-                market_cap=row.MARKET_CAP,
-                enterprise_value=row.ENTERPRISE_VALUE,
-                trailing_pe=row.TRAILING_PE,
-                forward_pe=row.FORWARD_PE,
-                price_to_sales=row.PRICE_TO_SALES,
-                price_to_book=row.PRICE_TO_BOOK,
-                enterprise_to_revenue=row.ENTERPRISE_TO_REVENUE,
-                enterprise_to_ebitda=row.ENTERPRISE_TO_EBITDA
-            )
-            for _, row in df.iterrows()
-        ]
-    
+        try:
+            # List available tables for diagnostic purposes
+            tables_query = f"SHOW TABLES IN {settings.SNOWFLAKE_DATABASE}.{settings.SNOWFLAKE_SCHEMA}"
+            try:
+                tables_df = self.execute_query(tables_query)
+                if not tables_df.empty:
+                    table_names = tables_df['name'].tolist() if 'name' in tables_df.columns else []
+                    logger.info(f"Available tables: {table_names}")
+            except Exception as e:
+                logger.warning(f"Error listing tables: {e}")
+            
+            # Query based only on quarter_label
+            logger.info(f"Querying Snowflake for NVIDIA valuation metrics from {time_range.start_quarter} to {time_range.end_quarter}")
+            
+            query = f"""
+            SELECT *
+            FROM {settings.SNOWFLAKE_DATABASE}.{settings.SNOWFLAKE_SCHEMA}.NVIDIA_VALUATION_METRICS
+            WHERE QUARTER_LABEL >= '{time_range.start_quarter}' 
+            AND QUARTER_LABEL <= '{time_range.end_quarter}'
+            ORDER BY QUARTER_LABEL
+            """
+            
+            df = self.execute_query(query)
+            
+            if not df.empty:
+                logger.info(f"Found {len(df)} rows of NVIDIA valuation metrics in Snowflake")
+                
+                # Convert DataFrame to list of NvidiaValuationMetric objects
+                metrics = []
+                for _, row in df.iterrows():
+                    # Print column names for debugging
+                    if _ == 0:
+                        logger.info(f"DataFrame columns: {df.columns.tolist()}")
+                    
+                    # Extract quarter_label
+                    quarter_label = row['QUARTER_LABEL'] if 'QUARTER_LABEL' in row else None
+                    
+                    if not quarter_label:
+                        logger.warning(f"Row missing QUARTER_LABEL, skipping: {row.to_dict()}")
+                        continue
+                        
+                    # Extract year and quarter from quarter_label
+                    try:
+                        year, quarter = self._parse_quarter_label(str(quarter_label))
+                    except Exception as e:
+                        logger.error(f"Error parsing quarter label '{quarter_label}': {e}")
+                        continue
+                    
+                    # Helper function to safely get numerical values
+                    def safe_get(df_row, column_name, default=0.0):
+                        if column_name in df_row and pd.notna(df_row[column_name]):
+                            try:
+                                return float(df_row[column_name])
+                            except:
+                                return default
+                        return default
+                    
+                    # Create metric object using the exact column names from the DataFrame
+                    metric = NvidiaValuationMetric(
+                        year=year,  # Derived from quarter_label
+                        quarter=quarter,  # Derived from quarter_label
+                        quarter_label=str(quarter_label),
+                        market_cap=safe_get(row, 'MARKET_CAP'),
+                        enterprise_value=safe_get(row, 'ENTERPRISE_VALUE'),
+                        trailing_pe=safe_get(row, 'TRAILING_PE'),
+                        forward_pe=safe_get(row, 'FORWARD_PE'),
+                        price_to_sales=safe_get(row, 'PRICE_TO_SALES'),
+                        price_to_book=safe_get(row, 'PRICE_TO_BOOK'),
+                        enterprise_to_revenue=safe_get(row, 'ENTERPRISE_TO_REVENUE'),
+                        enterprise_to_ebitda=safe_get(row, 'ENTERPRISE_TO_EBITDA')
+                    )
+                    metrics.append(metric)
+                
+                return metrics
+            else:
+                logger.warning("No data found in Snowflake table")
+                return []
+                    
+        except Exception as e:
+            logger.error(f"Error getting valuation metrics from Snowflake: {e}")
+            return []
+
     def generate_metrics_charts(self, time_range: TimeRange) -> Dict[str, str]:
         """Generate charts for NVIDIA valuation metrics"""
         metrics_data = self.get_valuation_metrics(time_range)
@@ -119,59 +170,117 @@ class SnowflakeService:
         
         charts = {}
         
-        # Chart 1: Market Cap and Enterprise Value
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.bar(df['quarter_label'], df['market_cap'] / 1e9, width=0.4, align='edge', label='Market Cap')
-        ax.bar(df['quarter_label'], df['enterprise_value'] / 1e9, width=-0.4, align='edge', label='Enterprise Value')
-        ax.set_title('NVIDIA Market Cap vs Enterprise Value')
-        ax.set_xlabel('Quarter')
-        ax.set_ylabel('Value (Billions USD)')
-        ax.legend()
-        plt.xticks(rotation=45)
-        plt.tight_layout()
+        try:
+            # Chart 1: Market Cap Trend
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot(df['quarter_label'], df['market_cap'] / 1e12, marker='o', linewidth=2, color='#76b900')  # NVIDIA green
+            ax.set_title('NVIDIA Market Cap Trend (Trillions USD)', fontsize=14)
+            ax.set_xlabel('Quarter', fontsize=12)
+            ax.set_ylabel('Market Cap (Trillions USD)', fontsize=12)
+            ax.grid(True, linestyle='--', alpha=0.7)
+            
+            # Add data labels
+            for i, v in enumerate(df['market_cap'] / 1e12):
+                ax.text(i, v + 0.05, f'{v:.2f}', ha='center', fontsize=10)
+                
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            
+            # Convert to base64 string
+            buffer = io.BytesIO()
+            plt.savefig(buffer, format='png', dpi=100)
+            buffer.seek(0)
+            charts['market_cap_trend'] = base64.b64encode(buffer.read()).decode('utf-8')
+            plt.close()
+        except Exception as e:
+            logger.error(f"Error generating market cap trend chart: {e}")
         
-        # Convert to base64 string
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        buffer.seek(0)
-        charts['market_valuation'] = base64.b64encode(buffer.read()).decode('utf-8')
-        plt.close()
+        try:
+            # Chart 2: P/E Ratio Changes
+            # Ensure we have valid values (no zeros to divide by)
+            valid_pe = df.copy()
+            valid_pe = valid_pe[valid_pe['trailing_pe'] > 0]
+            valid_pe = valid_pe[valid_pe['forward_pe'] > 0]
+            
+            if not valid_pe.empty:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.plot(valid_pe['quarter_label'], valid_pe['trailing_pe'], marker='o', label='Trailing P/E (TTM)', linewidth=2, color='#76b900')
+                ax.plot(valid_pe['quarter_label'], valid_pe['forward_pe'], marker='s', label='Forward P/E', linewidth=2, color='#1a9988')
+                ax.set_title('NVIDIA P/E Ratio Trends', fontsize=14)
+                ax.set_xlabel('Quarter', fontsize=12)
+                ax.set_ylabel('P/E Ratio', fontsize=12)
+                ax.grid(True, linestyle='--', alpha=0.7)
+                ax.legend(loc='best', fontsize=10)
+                
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                
+                # Convert to base64 string
+                buffer = io.BytesIO()
+                plt.savefig(buffer, format='png', dpi=100)
+                buffer.seek(0)
+                charts['pe_ratios'] = base64.b64encode(buffer.read()).decode('utf-8')
+                plt.close()
+        except Exception as e:
+            logger.error(f"Error generating P/E ratio chart: {e}")
         
-        # Chart 2: P/E Ratios
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(df['quarter_label'], df['trailing_pe'], marker='o', label='Trailing P/E')
-        ax.plot(df['quarter_label'], df['forward_pe'], marker='s', label='Forward P/E')
-        ax.set_title('NVIDIA P/E Ratios')
-        ax.set_xlabel('Quarter')
-        ax.set_ylabel('P/E Ratio')
-        ax.legend()
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
-        # Convert to base64 string
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        buffer.seek(0)
-        charts['pe_ratios'] = base64.b64encode(buffer.read()).decode('utf-8')
-        plt.close()
-        
-        # Chart 3: Price to Sales and Price to Book
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(df['quarter_label'], df['price_to_sales'], marker='o', label='Price to Sales')
-        ax.plot(df['quarter_label'], df['price_to_book'], marker='s', label='Price to Book')
-        ax.set_title('NVIDIA Price Ratios')
-        ax.set_xlabel('Quarter')
-        ax.set_ylabel('Ratio')
-        ax.legend()
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
-        # Convert to base64 string
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        buffer.seek(0)
-        charts['price_ratios'] = base64.b64encode(buffer.read()).decode('utf-8')
-        plt.close()
+        try:
+            # Chart 3: Valuation Ratio Comparison
+            # Make sure we have valid ratios
+            valid_ratios = df.copy()
+            
+            # Check if sufficient data exists
+            if len(valid_ratios) > 0:
+                # Remove infinite values and NaNs
+                for col in ['price_to_sales', 'price_to_book', 'enterprise_to_revenue', 'enterprise_to_ebitda']:
+                    valid_ratios = valid_ratios[~np.isinf(valid_ratios[col])]
+                    valid_ratios = valid_ratios[~np.isnan(valid_ratios[col])]
+                
+                # Skip if we don't have any valid data
+                if not valid_ratios.empty:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    
+                    # Create bar chart
+                    x = range(len(valid_ratios['quarter_label']))
+                    width = 0.2
+                    
+                    # Ensure enterprise_to_ebitda is not too large compared to others
+                    # If it is, scale it down for better visualization
+                    ev_ebitda_scaled = valid_ratios['enterprise_to_ebitda']
+                    scale_factor = 1.0
+                    
+                    if ev_ebitda_scaled.max() > 100:
+                        scale_factor = 10.0
+                        ev_ebitda_scaled = ev_ebitda_scaled / scale_factor
+                    
+                    ax.bar([i - width*1.5 for i in x], valid_ratios['price_to_sales'], width, label='Price/Sales', color='#76b900')
+                    ax.bar([i - width/2 for i in x], valid_ratios['price_to_book'], width, label='Price/Book', color='#1a9988')
+                    ax.bar([i + width/2 for i in x], valid_ratios['enterprise_to_revenue'], width, label='EV/Revenue', color='#f57c00')
+                    
+                    # Check if we have valid EBITDA ratios
+                    if (valid_ratios['enterprise_to_ebitda'] > 0).any():
+                        ax.bar([i + width*1.5 for i in x], ev_ebitda_scaled, width, 
+                            label=f'EV/EBITDA {f"(÷{scale_factor})" if scale_factor > 1 else ""}', 
+                            color='#c41e3a')
+                    
+                    ax.set_title('NVIDIA Valuation Ratios Comparison', fontsize=14)
+                    ax.set_xlabel('Quarter', fontsize=12)
+                    ax.set_ylabel('Ratio', fontsize=12)
+                    ax.set_xticks(x)
+                    ax.set_xticklabels(valid_ratios['quarter_label'], rotation=45)
+                    ax.legend(loc='best', fontsize=10)
+                    ax.grid(True, linestyle='--', alpha=0.4, axis='y')
+                    
+                    plt.tight_layout()
+                    
+                    # Convert to base64 string
+                    buffer = io.BytesIO()
+                    plt.savefig(buffer, format='png', dpi=100)
+                    buffer.seek(0)
+                    charts['valuation_ratios'] = base64.b64encode(buffer.read()).decode('utf-8')
+                    plt.close()
+        except Exception as e:
+            logger.error(f"Error generating valuation ratios chart: {e}")
         
         return charts
     
@@ -179,52 +288,3 @@ class SnowflakeService:
         """Parse quarter label in format YYYYqQ to year and quarter number"""
         parts = quarter_label.lower().split('q')
         return int(parts[0]), int(parts[1])
-        def insert_valuation_metric(self, data: dict):
-            """將單筆 NVIDIA 估值資料寫入 Snowflake"""
-        query = f"""
-        INSERT INTO RAW.NVIDIA_VALUATION_METRICS (
-            YEAR, QUARTER, QUARTER_LABEL, DATE,
-            MARKET_CAP, ENTERPRISE_VALUE, TRAILING_PE, FORWARD_PE,
-            PEG_RATIO, PRICE_TO_SALES, PRICE_TO_BOOK,
-            ENTERPRISE_TO_REVENUE, ENTERPRISE_TO_EBITDA
-        ) VALUES (
-            {data.get('year')}, 
-            {data.get('quarter')}, 
-            '{data.get('quarter_label')}', 
-            '{data.get('date')}',
-            {data.get('market_cap') or 'NULL'}, 
-            {data.get('enterprise_value') or 'NULL'}, 
-            {data.get('trailing_pe') or 'NULL'}, 
-            {data.get('forward_pe') or 'NULL'},
-            {data.get('peg_ratio') or 'NULL'}, 
-            {data.get('price_to_sales') or 'NULL'}, 
-            {data.get('price_to_book') or 'NULL'},
-            {data.get('enterprise_to_revenue') or 'NULL'}, 
-            {data.get('enterprise_to_ebitda') or 'NULL'}
-        )
-        """
-        self.execute_query(query)
-
-
-
-data = get_nvda_valuation_row()
-df = pd.DataFrame([data])
-
-service = SnowflakeService()
-for row in df.itertuples(index=False):
-    service.execute_query(
-        f"""
-        INSERT INTO RAW.NVIDIA_VALUATION_METRICS (
-            YEAR, QUARTER, QUARTER_LABEL, DATE,
-            MARKET_CAP, ENTERPRISE_VALUE, TRAILING_PE, FORWARD_PE,
-            PEG_RATIO, PRICE_TO_SALES, PRICE_TO_BOOK,
-            ENTERPRISE_TO_REVENUE, ENTERPRISE_TO_EBITDA
-        )
-        VALUES (
-            {row.year}, {row.quarter}, '{row.quarter_label}', '{row.date}',
-            {row.market_cap or 'NULL'}, {row.enterprise_value or 'NULL'}, {row.trailing_pe or 'NULL'}, {row.forward_pe or 'NULL'},
-            {row.peg_ratio or 'NULL'}, {row.price_to_sales or 'NULL'}, {row.price_to_book or 'NULL'},
-            {row.enterprise_to_revenue or 'NULL'}, {row.enterprise_to_ebitda or 'NULL'}
-        )
-        """
-    )

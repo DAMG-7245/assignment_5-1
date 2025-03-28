@@ -2,7 +2,7 @@ import requests
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from backend.core.config import settings
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,5 @@
-from backend.core.config import settings
-from backend.core.models import (
+from core.config import settings
+from core.models import (
     TimeRange, 
     AgentType, 
     AgentRequest, 
