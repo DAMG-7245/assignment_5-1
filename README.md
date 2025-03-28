@@ -33,7 +33,7 @@ A multi-agent research assistant that answers user questions about NVIDIA by com
 ---
 
 ## 📂 Project Structure
-
+```plaintext
 
 ├── AIUseDisclosure.md
 ├── Dockerfile
@@ -82,7 +82,7 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
-
+```
 ### 2. 📁 Create a .env file
 ```
 SNOWFLAKE_ACCOUNT=xxxx
