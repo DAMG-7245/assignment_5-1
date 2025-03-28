@@ -68,7 +68,7 @@ A multi-agent research assistant that answers user questions about NVIDIA by com
 ├── frontend
 │   └── app.py
 └── requirements.txt
-
+```
 
 ## **🛠️ Diagrams**
 ![Alt Text](nvidia_research_architecture.png)
@@ -82,7 +82,7 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
-```
+
 ### 2. 📁 Create a .env file
 ```
 SNOWFLAKE_ACCOUNT=xxxx
