@@ -34,6 +34,42 @@ A multi-agent research assistant that answers user questions about NVIDIA by com
 
 ## 📂 Project Structure
 
+
+├── AIUseDisclosure.md
+├── Dockerfile
+├── README.md
+├── architectural_diagram.md
+├── backend
+│   ├── agents
+│   │   ├── __init__.py
+│   │   ├── rag_agent.py
+│   │   ├── snowflake_agent.py
+│   │   └── web_search_agent.py
+│   ├── core
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   ├── langchain_utils.py
+│   │   ├── models.py
+│   │   └── orchestrator.py
+│   ├── data
+│   │   ├── ingest_yahoo_excel.py
+│   │   ├── nvidia_scrape.py
+│   │   ├── nvidia_yfin.py
+│   │   └── snowflake_setup.sql
+│   ├── main.py
+│   └── services
+│       ├── __init__.py
+│       ├── pdf_parser_service.py
+│       ├── pinecone_service.py
+│       ├── s3_service.py
+│       ├── snowflake_service.py
+│       └── web_search_service.py
+├── docker-compose.yml
+├── frontend
+│   └── app.py
+└── requirements.txt
+
+
 ## **🛠️ Diagrams**
 ![Alt Text](nvidia_research_architecture.png)
 
