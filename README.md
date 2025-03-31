@@ -43,7 +43,6 @@ A multi-agent research assistant that answers user questions about NVIDIA by com
 ```plaintext
 
 ├── AIUseDisclosure.md
-├── Dockerfile
 ├── README.md
 ├── architectural_diagram.md
 ├── backend
@@ -58,12 +57,9 @@ A multi-agent research assistant that answers user questions about NVIDIA by com
 │   │   ├── langchain_utils.py
 │   │   ├── models.py
 │   │   └── orchestrator.py
-│   ├── data
-│   │   ├── ingest_yahoo_excel.py
-│   │   ├── nvidia_scrape.py
-│   │   ├── nvidia_yfin.py
-│   │   └── snowflake_setup.sql
+│   ├── dockerfile
 │   ├── main.py
+│   ├── requirements.txt
 │   └── services
 │       ├── __init__.py
 │       ├── pdf_parser_service.py
@@ -71,10 +67,21 @@ A multi-agent research assistant that answers user questions about NVIDIA by com
 │       ├── s3_service.py
 │       ├── snowflake_service.py
 │       └── web_search_service.py
-├── docker-compose.yml
+├── codelab.md
+├── data
+│   ├── ingest_yahoo_excel.py
+│   ├── nvidia_scrape.py
+│   ├── nvidia_yfin.py
+│   └── snowflake_setup.sql
+├── dg.py
+├── docs
+│   └── codelab.json
 ├── frontend
-│   └── app.py
-└── requirements.txt
+│   ├── app.py
+│   ├── dockerfile
+│   └── requirements.txt
+├── index.html
+└── nvidia_research_architecture.png
 ```
 
 ## **🛠️ Diagrams**
